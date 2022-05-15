@@ -69,7 +69,7 @@ int process_arp_pkt(config_t *cfg, struct rte_mbuf *mbuf)
     switch (rte_be_to_cpu_16(arphdr->arp_opcode)) {
     case RTE_ARP_OP_REQUEST: {
         process_arp_request(cfg, arphdr, ethdr);
-        // zero-copy process icmp request mbuf
+        // zero-copy process arp request mbuf
         netdev_tx_commit(cfg, &mbuf);
         break;
     }

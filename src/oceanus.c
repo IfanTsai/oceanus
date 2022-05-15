@@ -3,10 +3,11 @@
 #include "ring.h"
 #include "netdev.h"
 #include "arp.h"
+#include "oceanus.h"
 #include <rte_ethdev.h>
 #include <rte_kni.h>
 
-config_t g_cfg;
+static config_t g_cfg;
 
 static inline void init_config(int argc, char *argv[])
 {
@@ -29,22 +30,33 @@ static inline void init_io_ring(config_t *cfg)
         EEXIT("failed to init io ring");
 }
 
-int main(int argc, char *argv[])
+void start_oceanus(int argc, char *argv[])
 {
     init_config(argc, argv);
     init_dpdk(&g_cfg);
     init_io_ring(&g_cfg);
 
-    unsigned int lcore_id = rte_lcore_id();
+    unsigned int lcore_id = rte_get_next_lcore(rte_lcore_id(), 1, 0);
+    rte_eal_remote_launch(netdev_rx_tx_loop, &g_cfg, lcore_id);
 
-    struct rte_timer arp_request_timer;
-    netdev_init_arp_update_timer(&g_cfg, &arp_request_timer, lcore_id);
+    struct rte_timer *arp_request_timer = rte_malloc(NULL, sizeof(struct rte_timer), 0);
+    netdev_init_arp_update_timer(&g_cfg, arp_request_timer, lcore_id);
 
-    lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
-    rte_eal_remote_launch(netdev_process_pkt_loop, &g_cfg, lcore_id);
+    RTE_LCORE_FOREACH_SLAVE(lcore_id) {
+        rte_eal_remote_launch(netdev_process_pkt_loop, &g_cfg, lcore_id);
+    }
+}
 
-    netdev_rx_tx_loop(&g_cfg);
+void wait_oceanus(void)
+{
+    rte_eal_mp_wait_lcore();
+    rte_eal_cleanup();
+}
+
+int main(int argc, char *argv[])
+{
+    start_oceanus(argc, argv);
+    wait_oceanus();
 
     return 0;
 }
-

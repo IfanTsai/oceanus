@@ -70,6 +70,7 @@ static void arp_update_timer_cb(__attribute__((unused)) struct rte_timer *tim, v
     uint32_t key = 0, next = 0;
     arp_entry_t *entry;
     while (arp_entry_iterate(&key, &next, &entry) >= 0) {
+        // reflush entry if timeout
         if (cur_tsc < entry->timeout * rte_get_timer_hz()) {
             del_arp_entry(entry->ip);
             send_arp_pkt(cfg, entry->hwaddr, entry->ip, RTE_ARP_OP_REQUEST);
@@ -102,8 +103,9 @@ int netdev_process_pkt_loop(void *arg)
     return 0;
 }
 
-void netdev_rx_tx_loop(config_t *cfg)
+int netdev_rx_tx_loop(void *arg)
 {
+    config_t *cfg = (config_t *)arg;
     struct rte_mbuf *mbufs[BURST_SIZE];
     for (;;) {
         // timer
@@ -121,9 +123,7 @@ void netdev_rx_tx_loop(config_t *cfg)
         uint16_t nr_send = de_out_ring_burst(cfg->ring, mbufs, BURST_SIZE);
         if (nr_send > 0) {
             rte_eth_tx_burst(cfg->port_id, 0, mbufs, nr_send);
-
-            for (unsigned int i = 0; i < nr_send; i++)
-                rte_pktmbuf_free(mbufs[i]);
+            rte_pktmbuf_free_bulk(mbufs, nr_send);
         }
     }
 }
@@ -135,7 +135,6 @@ void netdev_tx_commit(config_t *cfg, struct rte_mbuf **mbuf)
 
 void netdev_init_arp_update_timer(config_t *cfg, struct rte_timer *timer, unsigned lcore_id)
 {
-
     // initialize RTE timer library
     rte_timer_subsystem_init();
 

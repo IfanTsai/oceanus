@@ -14,11 +14,12 @@ CFLAGS += -I${BUILD_ROOT}/include
 ifeq ($(shell pkg-config --exists libdpdk && echo 0),0)
 
 all: shared
-.PHONY: shared static
+.PHONY: shared static so
 shared: build/$(APP)-shared
 	ln -sf $(APP)-shared build/$(APP)
 static: build/$(APP)-static
 	ln -sf $(APP)-static build/$(APP)
+so: build/lib$(APP).so
 
 PKGCONF=pkg-config --define-prefix
 
@@ -34,12 +35,15 @@ build/$(APP)-shared: $(SRCS-y) Makefile $(PC_FILE) $(BUILD_ROOT)/include/*.h | b
 build/$(APP)-static: $(SRCS-y) Makefile $(PC_FILE) $(BUILD_ROOT)/include/*.h | build
 	$(CC) $(CFLAGS) $(SRCS-y) -o $@ $(LDFLAGS) $(LDFLAGS_STATIC)
 
+build/lib$(APP).so: $(SRCS-y) Makefile $(PC_FILE) $(BUILD_ROOT)/include/*.h | build
+	$(CC) $(CFLAGS) $(SRCS-y) -fPIC -shared -o $@ $(LDFLAGS) $(LDFLAGS_SHARED)
+
 build:
 	@mkdir -p $@
 
 .PHONY: clean
 clean:
-	rm -f build/$(APP) build/$(APP)-static build/$(APP)-shared
+	rm -f build/$(APP) build/$(APP)-static build/$(APP)-shared build/lib$(APP).so
 	test -d build && rmdir -p build || true
 
 else # Build using legacy build system

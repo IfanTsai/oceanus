@@ -15,13 +15,13 @@ ninja -C build
 cd build && sudo ninja install
 ```
 
-### set lib path
+### set DPDK lib path
 ```bash
 sudo echo "/usr/local/lib/x86_64-linux-gnu" >> /etc/ld.so.conf
 sudo ldconfig
 ```
 
-### bind interface
+### bind network interface
 ```bash
 cd ..   # go back dpdk-stable-19.11.12
 sudo modprobe uio_pci_generic
@@ -31,10 +31,9 @@ sudo ifconfig eth0 down
 sudo ./usertools/dpdk-devbind.py --bind=igb_uio eth0
 ```
 
-### start oceanus
+### run oceanus
 ```bash
 git clone git@github.com:IfanTsai/oceanus.git
-cd oceanus
-make -j4
-sudo ./build/oceanus
+cd oceanus/app && make -j4  # cd oceanus && make so && cd app && make
+sudo make run
 ```

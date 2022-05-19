@@ -1,0 +1,38 @@
+name: Run cppcheck and build test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+   build-test:
+    name: Build Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Build DPDK
+      run: |
+        export PWD=$(pwd)
+        sudo apt update
+        sudo apt install -y gcc make meson ninja-build
+        wget http://fast.dpdk.org/rel/dpdk-19.11.12.tar.xz
+        tar xvf dpdk-19.11.12.tar.xz
+        cd dpdk-stable-19.11.12
+        meson build
+        ninja -C build
+        cd build && sudo ninja install
+        cd $(pwd)
+
+    - name: Set DPDK lib path
+      run: |
+        export LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:$(LD_LIBRARY_PATH)
+
+    - name: Build Oceanus
+      run: |
+        make so
+        cd app && make -j4

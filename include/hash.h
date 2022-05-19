@@ -7,7 +7,7 @@
 
 static inline uint32_t jhash(const void *key, uint32_t length)
 {
-	return rte_jhash(key, length, 0);
+    return rte_jhash(key, length, 0);
 }
 
 static inline struct rte_hash *create_hash(const char *name, uint32_t entries, uint32_t key_size)

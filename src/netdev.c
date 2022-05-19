@@ -5,10 +5,9 @@
 #include "arp.h"
 #include "arp_table.h"
 #include "icmp.h"
+#include "udp.h"
 #include <rte_ethdev.h>
-#include <rte_ip.h>
 #include <rte_kni.h>
-#include <stdio.h>
 
 static void process_recv_pkt(config_t *cfg, struct rte_mbuf *mbuf)
 {
@@ -31,6 +30,7 @@ static void process_recv_pkt(config_t *cfg, struct rte_mbuf *mbuf)
             break;
 
         case IPPROTO_UDP:
+            ret = process_udp_pkt(cfg, mbuf);
             break;
 
         case IPPROTO_TCP:
@@ -60,22 +60,8 @@ static void process_recv_pkts(config_t *cfg)
 
 static inline void process_send_pkts(config_t *cfg)
 {
-}
-
-static void arp_update_timer_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
-{
-    config_t *cfg = (config_t *)arg;
-
-    uint64_t cur_tsc = rte_get_tsc_cycles();
-    uint32_t key = 0, next = 0;
-    arp_entry_t *entry;
-    while (arp_entry_iterate(&key, &next, &entry) >= 0) {
-        // reflush entry if timeout
-        if (cur_tsc < entry->timeout * rte_get_timer_hz()) {
-            del_arp_entry(entry->ip);
-            send_arp_pkt(cfg, entry->hwaddr, entry->ip, RTE_ARP_OP_REQUEST);
-        }
-    }
+    send_udp_pkts(cfg);
+    //send_tcp_pkts(cfg);
 }
 
 static inline void process_timer(void)
@@ -123,7 +109,9 @@ int netdev_rx_tx_loop(void *arg)
         uint16_t nr_send = de_out_ring_burst(cfg->ring, mbufs, BURST_SIZE);
         if (nr_send > 0) {
             rte_eth_tx_burst(cfg->port_id, 0, mbufs, nr_send);
-            rte_pktmbuf_free_bulk(mbufs, nr_send);
+
+            for (uint16_t i = 0; i < nr_send; i++)
+                rte_pktmbuf_free(mbufs[i]);
         }
     }
 }
@@ -131,17 +119,5 @@ int netdev_rx_tx_loop(void *arg)
 void netdev_tx_commit(config_t *cfg, struct rte_mbuf **mbuf)
 {
     en_out_ring_burst(cfg->ring, mbuf, 1);
-}
-
-void netdev_init_arp_update_timer(config_t *cfg, struct rte_timer *timer, unsigned lcore_id)
-{
-    // initialize RTE timer library
-    rte_timer_subsystem_init();
-
-    // initialize timer structures
-    rte_timer_init(timer);
-
-    // load timer, every second, on lcore specified lcore_id, reloaded automatically
-    rte_timer_reset(timer, rte_get_timer_hz(), PERIODICAL, lcore_id, arp_update_timer_cb, cfg);
 }
 

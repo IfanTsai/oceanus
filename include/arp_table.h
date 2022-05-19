@@ -16,7 +16,7 @@
 #define ARP_ENTRY_TYPE_STATIC     1
 
 #define ARP_TABLE_ENTRIES         10240
-#define ARP_ENTRY_TIMEOUT         30
+#define ARP_ENTRY_TIMEOUT         60
 
 typedef struct arp_entry {
     uint32_t ip;
@@ -29,24 +29,9 @@ typedef struct arp_table {
     struct rte_hash *hash;
 } arp_table_t;
 
-static arp_table_t *arp_table = NULL;
+arp_table_t *get_arp_table_instance(void);
 
-static inline arp_table_t *get_arp_table_instance(void)
-{
-    if (!arp_table) {
-        arp_table = (arp_table_t *)rte_malloc(NULL, sizeof(arp_table_t), 0);
-        if (!arp_table)
-            EEXIT("failed to malloc arp table");
-
-        arp_table->hash = create_hash("arp table", ARP_TABLE_ENTRIES, sizeof(uint32_t));
-        if (!arp_table->hash)
-            EEXIT("failed to create arp hash table");
-    }
-
-    return arp_table;
-}
-
-static arp_entry_t *get_arp_entry(uint32_t ip)
+static inline arp_entry_t *get_arp_entry(uint32_t ip)
 {
     arp_table_t *arp_table = get_arp_table_instance();
 
@@ -56,7 +41,7 @@ static arp_entry_t *get_arp_entry(uint32_t ip)
     return arp_entry;
 }
 
-static uint8_t *get_dst_macaddr(uint32_t ip)
+static inline uint8_t *get_dst_macaddr(uint32_t ip)
 {
     arp_entry_t *arp_entry = get_arp_entry(ip);
 
@@ -79,7 +64,7 @@ static inline void print_arp_entry(arp_entry_t *entry)
         .s_addr = entry->ip,
     };
 
-    char buf[RTE_ETHER_ADDR_FMT_SIZE] = { 0 };
+    char buf[RTE_ETHER_ADDR_FMT_SIZE];
     rte_ether_format_addr(buf, RTE_ETHER_ADDR_FMT_SIZE, (struct rte_ether_addr *)entry->hwaddr);
 
     printf("%-15s %-20s %d\n", inet_ntoa(addr), buf, entry->type);
@@ -87,7 +72,7 @@ static inline void print_arp_entry(arp_entry_t *entry)
 
 static inline void print_arp_table(void)
 {
-    printf("        arp entry count: %d\n", hash_count(arp_table->hash));
+    printf("        arp entry count: %d\n", hash_count(get_arp_table_instance()->hash));
     printf("%-15s %-20s %s\n", "ip", "mac", "type");
 
     uint32_t key = 0, next = 0;

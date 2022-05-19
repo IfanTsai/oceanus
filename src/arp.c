@@ -3,7 +3,7 @@
 #include "netdev.h"
 #include "mbuf.h"
 
-static uint8_t g_arp_request_mac[RTE_ETHER_ADDR_LEN] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+uint8_t g_arp_request_mac[RTE_ETHER_ADDR_LEN] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 static inline void
 process_arp_request(config_t *cfg, struct rte_arp_hdr *arphdr, struct rte_ether_hdr *ethdr)
@@ -58,6 +58,22 @@ create_arp_pkt(uint8_t *pkt_data,
     arphdr->arp_data.arp_tip = dst_ip;
 }
 
+static void arp_update_timer_cb(__attribute__((unused)) struct rte_timer *tim, void *arg)
+{
+    config_t *cfg = (config_t *)arg;
+
+    uint64_t cur_tsc = rte_get_tsc_cycles();
+    uint32_t key = 0, next = 0;
+    arp_entry_t *entry;
+    while (arp_entry_iterate(&key, &next, &entry) >= 0) {
+        // reflush entry if timeout
+        if (cur_tsc < entry->timeout * rte_get_timer_hz()) {
+            del_arp_entry(entry->ip);
+            send_arp_pkt(cfg, entry->hwaddr, entry->ip, RTE_ARP_OP_REQUEST);
+        }
+    }
+}
+
 int process_arp_pkt(config_t *cfg, struct rte_mbuf *mbuf)
 {
     struct rte_ether_hdr *ethdr = mbuf_ethdr(mbuf);
@@ -97,5 +113,18 @@ void send_arp_pkt(config_t *cfg, uint8_t *dst_mac, uint32_t dst_ip, uint16_t arp
     create_arp_pkt(pkt_data, cfg->mac, dst_mac, cfg->ip, dst_ip, arp_opcode);
 
     netdev_tx_commit(cfg, &mbuf);
+}
+
+
+void init_arp_update_timer(config_t *cfg, struct rte_timer *timer, unsigned lcore_id)
+{
+    // initialize RTE timer library
+    rte_timer_subsystem_init();
+
+    // initialize timer structures
+    rte_timer_init(timer);
+
+    // load timer, every second, on lcore specified lcore_id, reloaded automatically
+    rte_timer_reset(timer, rte_get_timer_hz(), PERIODICAL, lcore_id, arp_update_timer_cb, cfg);
 }
 

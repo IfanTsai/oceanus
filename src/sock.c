@@ -23,6 +23,11 @@ sock_table_t *get_sock_table_instance(void)
             if (!tmp->fds_hash)
                 EEXIT("failed to create five tuples hash");
 
+            tmp->dport_listen_hash = create_hash("listen hash", SOCK_MAX_COUNT, sizeof(uint16_t));
+            if (!tmp->fds_hash)
+                EEXIT("failed to create five tuples hash");
+
+
             sock_table = tmp;
         }
 

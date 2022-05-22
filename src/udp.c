@@ -6,33 +6,33 @@
 #include "ring.h"
 
 static inline void
-create_udp_packet(uint8_t *pkt_data, uint16_t len,
-        uint8_t *smac, uint8_t *dmac, uint32_t sip, uint32_t dip, uint16_t sport, uint16_t dport, uint8_t *data)
+create_udp_packet(struct rte_mbuf *mbuf, uint8_t *smac, uint8_t *dmac, udp_payload_t *payload)
 {
-    struct rte_ether_hdr *ethdr = (struct rte_ether_hdr *)pkt_data;
+    struct rte_ether_hdr *ethdr = mbuf_ethdr(mbuf);
+    struct rte_ipv4_hdr *iphdr = mbuf_iphdr(mbuf);
+    struct rte_udp_hdr *udphdr = mbuf_udphdr(mbuf);
+
     rte_memcpy(ethdr->s_addr.addr_bytes, smac, RTE_ETHER_ADDR_LEN);
     rte_memcpy(ethdr->d_addr.addr_bytes, dmac, RTE_ETHER_ADDR_LEN);
     ethdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
-    struct rte_ipv4_hdr *iphdr = (struct rte_ipv4_hdr *)(pkt_data + sizeof(*ethdr));
     iphdr->version_ihl = 0x45;
     iphdr->type_of_service = 0;
-    iphdr->total_length = htons(len - sizeof(struct rte_ether_hdr));
+    iphdr->total_length = rte_cpu_to_be_16(mbuf->data_len - sizeof(*ethdr));
     iphdr->packet_id = 0;
     iphdr->fragment_offset = 0;
     iphdr->time_to_live = 64;
     iphdr->next_proto_id = IPPROTO_UDP;
-    iphdr->src_addr = sip;
-    iphdr->dst_addr = dip;
+    iphdr->src_addr = payload->sip;
+    iphdr->dst_addr = payload->dip;
     iphdr->hdr_checksum = 0;
     iphdr->hdr_checksum = rte_ipv4_cksum(iphdr);
 
-    struct rte_udp_hdr *udphdr = (void *)((uint8_t *)iphdr + sizeof(*iphdr));
-    udphdr->src_port = sport;
-    udphdr->dst_port = dport;
-    uint16_t udp_len = len - sizeof(*ethdr) - sizeof(*iphdr);
-    rte_memcpy((uint8_t *)(udphdr + 1), data, udp_len - sizeof(*udphdr));
-    udphdr->dgram_len = htons(udp_len);
+    udphdr->src_port = payload->sport;
+    udphdr->dst_port = payload->dport;
+    uint16_t udp_len = mbuf->data_len - sizeof(*ethdr) - sizeof(*iphdr);
+    rte_memcpy((void *)(udphdr + 1), payload->data, udp_len - sizeof(*udphdr));
+    udphdr->dgram_len = rte_cpu_to_be_16(udp_len);
     udphdr->dgram_cksum = 0;
     udphdr->dgram_cksum = rte_ipv4_udptcp_cksum(iphdr, udphdr);
 }
@@ -54,7 +54,7 @@ int process_udp_pkt(__attribute__((unused)) config_t *cfg, struct rte_mbuf *mbuf
     payload->sip = iphdr->src_addr;
     payload->sport = udphdr->src_port;
     payload->dport = udphdr->dst_port;
-    payload->length = ntohs(udphdr->dgram_len);
+    payload->length = rte_be_to_cpu_16(udphdr->dgram_len);
     payload->data = rte_malloc(NULL, payload->length - sizeof(struct rte_udp_hdr), 0);
     if (!payload->data) {
         rte_free(payload);
@@ -83,28 +83,34 @@ void send_udp_pkts(config_t *cfg)
         if (sock->protocol != IPPROTO_UDP)
             continue;
 
-        udp_payload_t *payload;
-        if (rte_ring_mc_dequeue(sock->sendbuf, (void **)&payload) < 0)
+        udp_payload_t *payloads[BURST_SIZE];
+        size_t nr_send = 0;
+        if ( (nr_send = rte_ring_mc_dequeue_burst(sock->sendbuf, (void **)&payloads, BURST_SIZE, NULL)) < 0)
             continue;
 
-        uint8_t *dst_mac = get_dst_macaddr(payload->dip);
-        if (!dst_mac) {
-            send_arp_pkt(cfg, g_arp_request_mac, payload->dip, RTE_ARP_OP_REQUEST);
-            rte_ring_mp_enqueue(sock->sendbuf, payload);
-        } else {
-            const unsigned total_length =
-                sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_udp_hdr) + payload->length;
+        for (size_t i = 0; i < nr_send; i++) {
+            udp_payload_t *payload = payloads[i];
+            uint8_t *dst_mac = get_dst_macaddr(payload->dip);
+            if (!dst_mac) {
+                send_arp_pkt(cfg, g_arp_request_mac, payload->dip, RTE_ARP_OP_REQUEST);
+                rte_ring_mp_enqueue(sock->sendbuf, payload);
+            } else {
+                const unsigned total_length =
+                    sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_udp_hdr) + payload->length;
 
-            struct rte_mbuf *mbuf = rte_pktmbuf_alloc(cfg->mpool);
-            if (!mbuf)
-                EEXIT("failed to alloc mbuf");
-            mbuf->pkt_len = mbuf->data_len = total_length;
+                struct rte_mbuf *mbuf = rte_pktmbuf_alloc(cfg->mpool);
+                if (!mbuf)
+                    EEXIT("failed to alloc mbuf");
 
-            uint8_t *pkt_data = rte_pktmbuf_mtod(mbuf, uint8_t *);
-            create_udp_packet(pkt_data, total_length,
-                    sock->mac, dst_mac, payload->sip, payload->dip, payload->sport, payload->dport, payload->data);
+                mbuf->pkt_len = mbuf->data_len = total_length;
+                create_udp_packet(mbuf, sock->mac, dst_mac, payload);
+                en_out_ring_burst(cfg->ring, &mbuf, 1);
+            }
+        }
 
-            en_out_ring_burst(cfg->ring, &mbuf, 1);
+        for (size_t i = 0; i < nr_send; i++) {
+            rte_free(payloads[i]->data);
+            rte_free(payloads[i]);
         }
     }
 }

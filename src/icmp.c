@@ -1,27 +1,10 @@
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 #include "icmp.h"
 #include "netdev.h"
+#include "util.h"
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_icmp.h>
-
-static inline void swap_mac(struct rte_ether_hdr *ethdr)
-{
-    uint8_t tmp_mac[RTE_ETHER_ADDR_LEN];
-
-    rte_memcpy(tmp_mac, &ethdr->d_addr, RTE_ETHER_ADDR_LEN);
-    rte_memcpy(&ethdr->d_addr, &ethdr->s_addr, RTE_ETHER_ADDR_LEN);
-    rte_memcpy(&ethdr->s_addr, tmp_mac, RTE_ETHER_ADDR_LEN);
-}
-
-static inline void swap_ip(struct rte_ipv4_hdr *iphdr)
-{
-    uint32_t tmp_ip;
-
-    rte_memcpy(&tmp_ip, &iphdr->src_addr, sizeof(tmp_ip));
-    rte_memcpy(&iphdr->src_addr, &iphdr->dst_addr, sizeof(tmp_ip));
-    rte_memcpy(&iphdr->dst_addr, &tmp_ip, sizeof(tmp_ip));
-}
 
 static uint16_t icmp_cksum(struct rte_ipv4_hdr *iphdr, struct rte_icmp_hdr *icmphdr)
 {

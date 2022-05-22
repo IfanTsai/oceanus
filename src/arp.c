@@ -3,7 +3,7 @@
 #include "netdev.h"
 #include "mbuf.h"
 
-uint8_t g_arp_request_mac[RTE_ETHER_ADDR_LEN] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+uint8_t g_arp_request_mac[RTE_ETHER_ADDR_LEN] = { [0 ... RTE_ETHER_ADDR_LEN - 1] = 0xFF };
 
 static inline void
 process_arp_request(config_t *cfg, struct rte_arp_hdr *arphdr, struct rte_ether_hdr *ethdr)

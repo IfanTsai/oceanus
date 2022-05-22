@@ -6,6 +6,8 @@
 #include "arp_table.h"
 #include "icmp.h"
 #include "udp.h"
+#include "tcp.h"
+#include "sock.h"
 #include <rte_ethdev.h>
 #include <rte_kni.h>
 
@@ -34,6 +36,7 @@ static void process_recv_pkt(config_t *cfg, struct rte_mbuf *mbuf)
             break;
 
         case IPPROTO_TCP:
+            ret = process_tcp_pkt(cfg, mbuf);
             break;
         }
 
@@ -61,7 +64,7 @@ static void process_recv_pkts(config_t *cfg)
 static inline void process_send_pkts(config_t *cfg)
 {
     send_udp_pkts(cfg);
-    //send_tcp_pkts(cfg);
+    send_tcp_pkts(cfg);
 }
 
 static inline void process_timer(void)

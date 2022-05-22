@@ -34,5 +34,5 @@ jobs:
 
     - name: Build Oceanus
       run: |
-        make so
+        make -j4
         cd app && make -j4

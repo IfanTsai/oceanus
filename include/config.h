@@ -2,7 +2,6 @@
 #define __CONFIG_H__
 
 #include "ring.h"
-#include "sock.h"
 #include <rte_ether.h>
 #include <arpa/inet.h>
 

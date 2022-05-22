@@ -15,7 +15,7 @@ $(APP): $(SRCS) $(LIBOCEANUS_DIR)/lib$(LIBOCEANUS).so
 	$(CC) $(CFLAGS) $(SRCS) -o $@ $(LDFLAGS)
 
 $(LIBOCEANUS_DIR)/lib$(LIBOCEANUS).so: FORCE
-	make -C $(OCEANUS_DIR) so
+	@make -C $(OCEANUS_DIR)
 
 PHONY += FORCE
 FORCE:;
@@ -31,6 +31,6 @@ clean:
 PHONY += distclean
 distclean:
 	rm -f $(APP)
-	make -C $(OCEANUS_DIR) clean
+	make -C $(OCEANUS_DIR) distclean
 
 .PHONY: $(PHONY)

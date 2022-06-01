@@ -100,7 +100,7 @@ int netdev_rx_tx_loop(void *arg)
         // timer
         process_timer();
 
-        // redeive
+        // receive
         uint16_t nr_recvd = rte_eth_rx_burst(cfg->port_id, 0, mbufs, BURST_SIZE);
         if (nr_recvd > BURST_SIZE)
             EEXIT("too many packets, %d", nr_recvd);

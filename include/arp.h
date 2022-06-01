@@ -5,7 +5,7 @@
 #include <rte_arp.h>
 #include <rte_timer.h>
 
-uint8_t g_arp_request_mac[RTE_ETHER_ADDR_LEN];
+extern uint8_t g_arp_request_mac[RTE_ETHER_ADDR_LEN];
 
 int process_arp_pkt(config_t *cfg, struct rte_mbuf *mbuf);
 void send_arp_pkt(config_t *cfg, uint8_t *dst_mac, uint32_t dst_ip, uint16_t arp_opcode);

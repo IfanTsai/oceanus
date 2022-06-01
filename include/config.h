@@ -1,6 +1,7 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
+#include "fd.h"
 #include "ring.h"
 #include <rte_ether.h>
 #include <arpa/inet.h>

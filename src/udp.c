@@ -79,7 +79,7 @@ void send_udp_pkts(config_t *cfg)
     const five_tuple_t *key = NULL;
     uint32_t next = 0;
     sock_t *sock = NULL;
-    while (five_tuples_hash_iterate(&key, &sock, &next) >= 0) {
+    while (five_tuples_sock_hash_iterate(&key, &sock, &next) >= 0) {
         if (sock->protocol != IPPROTO_UDP)
             continue;
 

@@ -8,21 +8,27 @@
 #include <rte_ethdev.h>
 #include <rte_kni.h>
 
+#define IP              "192.168.18.115"
+#define RING_SIZE       1024
+#define POOL_SIZE       (4096 - 1)
+#define PORT_ID         0
+#define KNI_NAME_PREFIX "vEth"
+
 static config_t g_cfg;
 
 static inline void init_config(int argc, char *argv[])
 {
     g_cfg.argc = argc;
     g_cfg.argv = argv;
-    g_cfg.port_id = 0;
-    g_cfg.mpool_name = "mbuf pool";
-    g_cfg.mpool_size = 4096 - 1;
+    g_cfg.port_id = PORT_ID;
+    g_cfg.mpool_name = " config mbuf pool";
+    g_cfg.mpool_size = POOL_SIZE;
     g_cfg.mbuf_size = RTE_MBUF_DEFAULT_BUF_SIZE;
-    g_cfg.burst_size = 1024;
-    g_cfg.kni_naem_prefix = "vEth";
-    g_cfg.ring_name = "io ring";
-    g_cfg.ring_size = 1024;
-    g_cfg.ip = inet_addr("192.168.18.115");
+    g_cfg.burst_size = BURST_SIZE;
+    g_cfg.kni_naem_prefix = KNI_NAME_PREFIX;
+    g_cfg.ring_name = "config io ring";
+    g_cfg.ring_size = RING_SIZE;
+    g_cfg.ip = inet_addr(IP);
 }
 
 static inline void init_io_ring(config_t *cfg)
@@ -56,9 +62,7 @@ int wait_oceanus(void)
     return rte_eal_cleanup();
 }
 
-int main(int argc, char *argv[])
+in_addr_t get_local_ip(void)
 {
-    start_oceanus(argc, argv);
-
-    return wait_oceanus();
+    return g_cfg.ip;
 }

@@ -10,39 +10,35 @@
 #define RING_SIZE 1024
 
 static uint8_t *g_this_mac;
+static __fd_set_t *g_fd_set;
 
-static __fd_set_t __fd_set = {
-    .fds_bits = { 0 },
-    .rwlock = PTHREAD_RWLOCK_INITIALIZER,
-};
-
-static inline int get_unused_fd(void)
-{
-    return __get_unused_fd(&__fd_set);
-}
-
-static inline void put_unused_fd(int fd)
-{
-    return __put_unused_fd(&__fd_set, fd);
-}
+#define get_unused_fd() __get_unused_fd(g_fd_set)
+#define put_unused_fd(fd) __put_unused_fd(g_fd_set, fd)
 
 void init_api(config_t *cfg)
 {
     g_this_mac = cfg->mac;
+    g_fd_set = get_fd_set_instance();
 }
 
 int o_socket(int domain, int type, __attribute__((unused)) int protocol)
 {
-    if (domain != AF_INET)
+    if (domain != AF_INET) {
+        errno = EAFNOSUPPORT;
         return -1;
+    }
 
     int fd = get_unused_fd();
-    if (fd < 0)
+    if (fd < 0) {
+        errno = EINVAL;
         return -1;
+    }
 
     sock_t *sock = rte_zmalloc(NULL, sizeof(sock_t), 0);
-    if (!sock)
+    if (!sock) {
+        errno = ENOMEM;
         return -1;
+    }
 
     if (type == SOCK_STREAM) {
         sock->protocol = IPPROTO_TCP;
@@ -52,14 +48,18 @@ int o_socket(int domain, int type, __attribute__((unused)) int protocol)
         snprintf(ring_name, sizeof(ring_name), "sock_recv_buff_%d", fd);
         sock->recvbuf = rte_ring_create(ring_name, RING_SIZE, rte_socket_id(),
                     RING_F_SP_ENQ | RING_F_SC_DEQ);
-        if (!sock->recvbuf)
+        if (!sock->recvbuf) {
+            errno = ENOMEM;
             goto err_create_recv_buf;
+        }
 
         snprintf(ring_name, sizeof(ring_name), "sock_send_buff_%d", fd);
         sock->sendbuf = rte_ring_create(ring_name, RING_SIZE, rte_socket_id(),
                     RING_F_SP_ENQ | RING_F_SC_DEQ);
-        if (!sock->sendbuf)
+        if (!sock->sendbuf) {
+            errno = ENOMEM;
             goto err_create_send_buf;
+        }
     }
 
     sock->fd = fd;
@@ -81,12 +81,16 @@ err_create_recv_buf:
 
 int o_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
-    if (addrlen != sizeof(struct sockaddr_in))
+    if (addrlen != sizeof(struct sockaddr_in)) {
+        errno = EINVAL;
         return -1;
+    }
 
     sock_t *sock = get_sock_from_fd(sockfd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
     const struct sockaddr_in *addr_in = (const struct sockaddr_in *)addr;
     rte_memcpy(sock->mac, g_this_mac, RTE_ETHER_ADDR_LEN);
@@ -107,15 +111,19 @@ int o_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 int o_listen(int sockfd, __attribute__((unused)) int backlog)
 {
     sock_t *sock = get_sock_from_fd(sockfd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
-    if (sock->protocol != IPPROTO_TCP)
+    if (sock->protocol != IPPROTO_TCP) {
+        errno = EPROTOTYPE;
         return -1;
+    }
 
     sock->status = TCP_STATUS_LISTEN;
 
-    add_sock_to_dport_listen_hash(sock);
+    add_sock_to_dports_listen_hash(sock);
 
     return 0;
 }
@@ -123,12 +131,16 @@ int o_listen(int sockfd, __attribute__((unused)) int backlog)
 int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 {
     sock_t *listen_sock = get_sock_from_fd(sockfd);
-    if (!listen_sock)
+    if (!listen_sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
 
-    if (listen_sock->protocol != IPPROTO_TCP)
+    if (listen_sock->protocol != IPPROTO_TCP) {
+        errno = EPROTOTYPE;
         return -1;
+    }
 
     sock_t *accept_sock = NULL;
 
@@ -136,6 +148,11 @@ int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
     while ( !(accept_sock = get_accept_sock(listen_sock->dport)))
         pthread_cond_wait(&listen_sock->cond, &listen_sock->mutex);
     pthread_mutex_unlock(&listen_sock->mutex);
+
+    if (accept_sock->fd != FD_UNINITIALIZE) {
+        errno = EINVAL;
+        return -1;
+    }
 
     accept_sock->fd = get_unused_fd();
     struct sockaddr_in *src_addr_in = (struct sockaddr_in *)addr;
@@ -151,11 +168,15 @@ int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 ssize_t o_recv(int sockfd, void *buf, size_t len, __attribute__((unused)) int flags)
 {
     sock_t *sock = get_sock_from_fd(sockfd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
-    if (sock->protocol != IPPROTO_TCP)
+    if (sock->protocol != IPPROTO_TCP) {
+        errno = EPROTOTYPE;
         return -1;
+    }
 
     tcp_fragment_t *fragment;
     pthread_mutex_lock(&sock->mutex);
@@ -194,36 +215,20 @@ ssize_t o_recv(int sockfd, void *buf, size_t len, __attribute__((unused)) int fl
 ssize_t o_send(int sockfd, const void *buf, size_t len, __attribute__((unused)) int flags)
 {
     sock_t *sock = get_sock_from_fd(sockfd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
-    if (sock->protocol != IPPROTO_TCP)
+    if (sock->protocol != IPPROTO_TCP) {
+        errno = EPROTOTYPE;
         return -1;
+    }
 
-    tcp_fragment_t *fragment = rte_malloc(NULL, sizeof(tcp_fragment_t), 0);
-    if (!fragment)
+    if ( !send_fragment_with_data(sock, buf, len) ) {
+        errno = ENOMEM;
         return -1;
-
-    fragment->dport = sock->sport;
-	fragment->sport = sock->dport;
-	fragment->seq = sock->send_next;
-	fragment->ack = sock->recv_next;
-	fragment->win = TCP_INITIAL_WINDOW;
-	fragment->data_off = 0x50;
-	fragment->data = NULL;
-	fragment->length = 0;
-	fragment->flags = RTE_TCP_ACK_FLAG | RTE_TCP_PSH_FLAG;
-	fragment->data = rte_malloc(NULL, len, 0);
-	if (!fragment->data) {
-	    rte_free(fragment);
-
-	    return -1;
-	}
-
-	rte_memcpy(fragment->data, buf, len);
-	fragment->length = len;
-
-	rte_ring_mp_enqueue(sock->sendbuf, fragment);
+    }
 
     return len;
 }
@@ -232,8 +237,10 @@ ssize_t o_recvfrom(int sockfd, void *buf, size_t len, __attribute__((unused)) in
                         struct sockaddr *src_addr, socklen_t *addrlen)
 {
     sock_t *sock = get_sock_from_fd(sockfd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
 
     udp_payload_t *payload;
@@ -272,12 +279,16 @@ ssize_t o_recvfrom(int sockfd, void *buf, size_t len, __attribute__((unused)) in
 ssize_t o_sendto(int sockfd, const void *buf, size_t len, __attribute__((unused)) int flags,
                       const struct sockaddr *dst_addr, socklen_t addrlen)
 {
-    if (addrlen != sizeof(struct sockaddr_in))
+    if (addrlen != sizeof(struct sockaddr_in)) {
+        errno = EINVAL;
         return -1;
+    }
 
     sock_t *sock = get_sock_from_fd(sockfd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
     udp_payload_t *payload = rte_malloc(NULL, sizeof(udp_payload_t), 0);
     if (!payload)
@@ -291,8 +302,10 @@ ssize_t o_sendto(int sockfd, const void *buf, size_t len, __attribute__((unused)
     payload->length = len;
 
     payload->data = rte_zmalloc(NULL, len, 0);
-    if (!payload->data)
+    if (!payload->data) {
+        errno = ENOMEM;
         return -1;
+    }
 
     rte_memcpy(payload->data, buf, len);
 
@@ -304,13 +317,20 @@ ssize_t o_sendto(int sockfd, const void *buf, size_t len, __attribute__((unused)
 int o_close(int fd)
 {
     sock_t *sock = get_sock_from_fd(fd);
-    if (!sock)
+    if (!sock) {
+        errno = ENOTSOCK;
         return -1;
+    }
 
-    remove_sock_from_sock_table(sock);
-    rte_ring_free(sock->sendbuf);
-    rte_ring_free(sock->recvbuf);
-    rte_free(sock);
+    if (sock->protocol == IPPROTO_TCP && sock->status != TCP_STATUS_LISTEN) {
+        send_fin_fragment(sock);
+        sock->status = TCP_STATUS_LAST_ACK;
+    } else {
+        remove_sock_from_sock_table(sock);
+        rte_ring_free(sock->sendbuf);
+        rte_ring_free(sock->recvbuf);
+        rte_free(sock);
+    }
 
     put_unused_fd(fd);
 

@@ -1,6 +1,7 @@
 #ifndef __OCEANUS_H__
 #define __OCEANUS_H__
 
+#include "epoll.h"
 #include <arpa/inet.h>
 
 void start_oceanus(int argc, char *argv[]);
@@ -19,6 +20,6 @@ ssize_t o_sendto(int sockfd, const void *buf, size_t len, int flags,
                       const struct sockaddr *dst_addr, socklen_t addrlen);
 int o_close(int fd);
 
-
+in_addr_t get_local_ip(void);
 
 #endif

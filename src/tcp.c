@@ -6,11 +6,22 @@
 #include "hash.h"
 #include "util.h"
 #include "netdev.h"
+#include "epoll.h"
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_tcp.h>
 
 #define RING_SIZE 1024
+
+static void notify_epoll_all(int fd, uint32_t event)
+{
+    const int *key = NULL;
+    uint32_t next = 0;
+    eventpoll_t *ep = NULL;
+
+    while (fds_hash_eventpoll_iterate(&key, &ep, &next) >= 0)
+        epoll_event_cb(ep, fd, event);
+}
 
 static inline void
 create_tcp_pkt(struct rte_mbuf *mbuf,
@@ -73,10 +84,10 @@ tcp_fragment_t *create_empty_data_fragment(uint16_t sport, uint16_t dport, uint3
     return fragment;
 }
 
-static inline tcp_fragment_t *create_ack_fragment(sock_t *sock, struct rte_tcp_hdr *tcphdr)
+static inline tcp_fragment_t *create_ack_fragment(sock_t *sock)
 {
     tcp_fragment_t *fragment =
-	create_empty_data_fragment(tcphdr->dst_port, tcphdr->src_port, sock->send_next, sock->recv_next);
+	create_empty_data_fragment(sock->dport, sock->sport, sock->send_next, sock->recv_next);
     if (!fragment)
         return NULL;
 
@@ -85,9 +96,9 @@ static inline tcp_fragment_t *create_ack_fragment(sock_t *sock, struct rte_tcp_h
     return fragment;
 }
 
-static inline tcp_fragment_t *send_ack_fragment(struct rte_tcp_hdr *tcphdr, sock_t *sock)
+static inline tcp_fragment_t *send_ack_fragment(sock_t *sock)
 {
-    tcp_fragment_t *fragment = create_ack_fragment(sock, tcphdr);
+    tcp_fragment_t *fragment = create_ack_fragment(sock);
     if (!fragment)
         return NULL;
 
@@ -96,9 +107,9 @@ static inline tcp_fragment_t *send_ack_fragment(struct rte_tcp_hdr *tcphdr, sock
     return fragment;
 }
 
-static inline tcp_fragment_t *send_syn_fragment(struct rte_tcp_hdr *tcphdr, sock_t *sock)
+static inline tcp_fragment_t *send_syn_fragment(sock_t *sock)
 {
-    tcp_fragment_t *fragment = create_ack_fragment(sock, tcphdr);
+    tcp_fragment_t *fragment = create_ack_fragment(sock);
     if (!fragment)
         return NULL;
 
@@ -127,6 +138,38 @@ static inline void send_rst_fragment(config_t *cfg, struct rte_mbuf *mbuf)
     tcphdr->cksum = rte_ipv4_udptcp_cksum(iphdr, tcphdr);
 
     netdev_tx_commit(cfg, &mbuf);
+}
+
+tcp_fragment_t *send_fin_fragment(sock_t *sock)
+{
+    tcp_fragment_t *fragment = create_ack_fragment(sock);
+    if (!fragment)
+        return NULL;
+
+    fragment->flags |= RTE_TCP_FIN_FLAG;
+
+    rte_ring_mp_enqueue(sock->sendbuf, fragment);
+
+    return fragment;
+}
+
+tcp_fragment_t *send_fragment_with_data(sock_t *sock, const void *buf, size_t len)
+{
+    tcp_fragment_t *fragment = create_ack_fragment(sock);
+    fragment->flags |= RTE_TCP_PSH_FLAG;
+    fragment->data = rte_malloc(NULL, len, 0);
+    if (!fragment->data) {
+        rte_free(fragment);
+
+        return NULL;
+    }
+
+    rte_memcpy(fragment->data, buf, len);
+    fragment->length = len;
+
+    rte_ring_mp_enqueue(sock->sendbuf, fragment);
+
+    return fragment;
 }
 
 static inline int put_fragment_to_recv_buf(sock_t *sock, struct rte_tcp_hdr *tcphdr, uint8_t *data, uint32_t len)
@@ -252,11 +295,13 @@ static int process_tcp_established(sock_t *sock, struct rte_tcp_hdr *tcphdr, uin
             return -1;
 
         /* return ack fragment to send buffer, will return ack to peer */
-        sock->send_next = ntohl(tcphdr->recv_ack);
+        sock->send_next = rte_be_to_cpu_32(tcphdr->recv_ack);
         sock->recv_next += payload_len;
 
-        if (send_ack_fragment(tcphdr, sock) < 0)
+        if (send_ack_fragment(sock) < 0)
             return -1;
+
+        notify_epoll_all(sock->fd, EPOLLIN);
     }
 
     if (tcphdr->tcp_flags & RTE_TCP_ACK_FLAG) {
@@ -270,11 +315,13 @@ static int process_tcp_established(sock_t *sock, struct rte_tcp_hdr *tcphdr, uin
             return -1;
 
         /* return ack fragment to send buffer, will return ack to peer */
-        sock->send_next = ntohl(tcphdr->recv_ack);
+        sock->send_next = rte_be_to_cpu_32(tcphdr->recv_ack);
         sock->recv_next++;
 
-        if (send_ack_fragment(tcphdr, sock) < 0)
+        if (send_ack_fragment(sock) < 0)
             return -1;
+
+        notify_epoll_all(sock->fd, EPOLLIN);
     }
 
     return 0;
@@ -294,9 +341,13 @@ static int process_tcp_syn_rcvd(sock_t *sock, struct rte_tcp_hdr *tcphdr)
     if (!listen_sock)
         EEXIT("failed to get listen socket in TCP_STATUS_SYN_RCVD");
 
+    add_sock_to_dports_accept_hash(sock);
+
     pthread_mutex_lock(&listen_sock->mutex);
     pthread_cond_signal(&listen_sock->cond);
     pthread_mutex_unlock(&listen_sock->mutex);
+
+    notify_epoll_all(listen_sock->fd, EPOLLIN);
 
     return 0;
 }
@@ -312,7 +363,7 @@ static int process_tcp_listen(config_t *cfg, struct rte_tcp_hdr *tcphdr, struct 
         return -1;
 
     sock->recv_next = rte_be_to_cpu_32(tcphdr->sent_seq) + 1;
-    tcp_fragment_t *fragment = send_syn_fragment(tcphdr, sock);
+    tcp_fragment_t *fragment = send_syn_fragment(sock);
     if (!fragment)
         goto err_malloc_fragment;
 
@@ -367,7 +418,7 @@ int process_tcp_pkt(config_t *cfg, struct rte_mbuf *mbuf)
         break;
 
     case TCP_STATUS_ESTABLISHED: {
-        uint16_t tcp_len = ntohs(iphdr->total_length) - sizeof(struct rte_ipv4_hdr);
+        uint16_t tcp_len = rte_be_to_cpu_16(iphdr->total_length) - sizeof(struct rte_ipv4_hdr);
         if (process_tcp_established(sock, tcphdr, tcp_len) < 0)
             return -1;
         break;
@@ -405,7 +456,7 @@ void send_tcp_pkts(config_t *cfg)
     const five_tuple_t *key = NULL;
     uint32_t next = 0;
     sock_t *sock = NULL;
-    while (five_tuples_hash_iterate(&key, &sock, &next) >= 0) {
+    while (five_tuples_sock_hash_iterate(&key, &sock, &next) >= 0) {
         if (sock->protocol != IPPROTO_TCP || sock->sendbuf == NULL)
             continue;
 

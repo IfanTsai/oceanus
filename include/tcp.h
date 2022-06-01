@@ -2,24 +2,11 @@
 #define __TCP_H__
 
 #include "config.h"
+#include "sock.h"
 
 #define TCP_OPTION_INTS    10
 #define TCP_MAX_SEQ        UINT_MAX
 #define TCP_INITIAL_WINDOW 14600
-
-typedef enum {
-    TCP_STATUS_CLOSED = 0,
-    TCP_STATUS_LISTEN,
-    TCP_STATUS_SYN_RCVD,
-    TCP_STATUS_SYN_SENT,
-    TCP_STATUS_ESTABLISHED,
-    TCP_STATUS_FIN_WAIT1,
-    TCP_STATUS_FIN_WAIT2,
-    TCP_STATUS_CLOSING,
-    TCP_STATUS_TIME_WAIT,
-    TCP_STATUS_CLOSE_WAIT,
-    TCP_STATUS_LAST_ACK,
-} tcp_status_t;
 
 typedef struct {
     uint16_t sport;
@@ -39,5 +26,7 @@ typedef struct {
 
 void send_tcp_pkts(config_t *cfg);
 int process_tcp_pkt(config_t *cfg, struct rte_mbuf *mbuf);
+tcp_fragment_t *send_fin_fragment(sock_t *sock);
+tcp_fragment_t *send_fragment_with_data(sock_t *sock, const void *buf, size_t len);
 
 #endif

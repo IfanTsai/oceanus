@@ -34,6 +34,7 @@ sudo ./usertools/dpdk-devbind.py --bind=igb_uio eth0
 ### run oceanus
 ```bash
 git clone git@github.com:IfanTsai/oceanus.git
+# open src/oceanus.c to modify IP
 cd oceanus/app && make -j4  # cd oceanus && make so && cd app && make
 sudo make run
 ```

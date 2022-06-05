@@ -8,6 +8,7 @@
 #include "udp.h"
 #include "tcp.h"
 #include "sock.h"
+#include "edd.h"
 #include <rte_ethdev.h>
 #include <rte_kni.h>
 
@@ -105,8 +106,15 @@ int netdev_rx_tx_loop(void *arg)
         if (nr_recvd > BURST_SIZE)
             EEXIT("too many packets, %d", nr_recvd);
 
-        if (nr_recvd > 0)
+        if (nr_recvd > 0) {
+            if (detect_ddos_burst(mbufs, nr_recvd)) {
+                for (uint16_t i = 0; i < nr_recvd; i++)
+                    rte_pktmbuf_free(mbufs[i]);
+                continue;
+            }
+
             en_in_ring_burst(cfg->ring, mbufs, nr_recvd);
+        }
 
         // send
         uint16_t nr_send = de_out_ring_burst(cfg->ring, mbufs, BURST_SIZE);

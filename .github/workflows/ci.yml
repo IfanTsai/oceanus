@@ -1,4 +1,4 @@
-name: Run cppcheck and build test
+name: Run build test
 
 on:
   push:
@@ -6,27 +6,42 @@ on:
   pull_request:
     branches: [ master ]
 
-jobs:
+env:
+  DPDK_PATH: dpdk-stable-19.11.12
+  DPDK_ARCHIVE: dpdk-19.11.12.tar.xz
 
+jobs:
    build-test:
     name: Build Test
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - name: Build DPDK
+    - name: Install build dependencies
       run: |
-        export PWD=$(pwd)
         sudo apt update
         sudo apt install -y gcc make meson ninja-build
-        wget http://fast.dpdk.org/rel/dpdk-19.11.12.tar.xz
-        tar xvf dpdk-19.11.12.tar.xz
-        cd dpdk-stable-19.11.12
+
+    - name: Cache DPDK
+      id: cache-dpdk
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.DPDK_PATH }}
+        key: ${{ runner.os }}-dpdk-19.11.12
+
+    - name: Build DPDK
+      if: steps.cache-dpdk.outputs.cache-hit != 'true'
+      run: |
+        wget http://fast.dpdk.org/rel/${{ env.DPDK_ARCHIVE }}
+        tar xvf ${{ env.DPDK_ARCHIVE }}
+        cd ${{ env.DPDK_PATH }}
         meson build
         ninja -C build
-        cd build && sudo ninja install
-        cd $(pwd)
+
+    - name: Install DPDK
+      run: |
+        cd ${{ env.DPDK_PATH }}/build && sudo ninja install
 
     - name: Set DPDK lib path
       run: |
@@ -34,5 +49,4 @@ jobs:
 
     - name: Build Oceanus
       run: |
-        make -j4
         cd app && make -j4
